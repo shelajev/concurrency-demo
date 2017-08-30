@@ -9,11 +9,6 @@ import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.client.RestTemplate;
 
-import java.util.Arrays;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.stream.Collectors;
-
 import static org.shelajev.concurrencydemo.Misc.stall;
 
 @RestController
@@ -35,17 +30,49 @@ public class Controller {
 
   private Problem getSolution() {
     return urls -> {
-      CompletableFuture result = CompletableFuture.anyOf(Arrays.asList(urls).stream().map(
-        (url) -> CompletableFuture.supplyAsync(() -> getBytes(url))
-      ).collect(Collectors.toList()).toArray(new CompletableFuture[0]));
 
-      try {
-        return (byte[]) result.get();
+      byte[][] result = new byte[1][];
+      PetersonLock lock = new PetersonLock();
+      String url0 = urls[0];
+      String url1 = urls[1];
+
+      Thread t1 = new Thread(()-> {
+        lock.flag0 = true;
+        lock.turn = 1;
+
+        while(lock.flag1 && lock.turn == 1) {
+          //busy wait
+        }
+        //critical section
+        byte[] bytes = getBytes(url0);
+        if(result[0] == null) {
+          result[0] = bytes;
+        }
+
+        lock.flag0 = false;
+      });
+
+      Thread t2 = new Thread(()-> {
+        lock.flag1 = true;
+        lock.turn = 0;
+
+        while(lock.flag0 && lock.turn == 0) {
+          //busy wait
+        }
+        //critical section
+        byte[] bytes = getBytes(url1);
+        if(result[0] == null) {
+          result[0] = bytes;
+        }
+
+        lock.flag1 = false;
+      });
+
+      t1.start(); t2.start();
+      while(result[0] == null) {
+        Misc.sleep(200);
       }
-      catch (InterruptedException | ExecutionException e) {
-        Misc.rethrow(e);
-      }
-      return null;
+      return result[0];
     };
   }
 

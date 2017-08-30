@@ -1,5 +1,9 @@
 package org.shelajev.concurrencydemo;
 
+import akka.actor.ActorRef;
+import akka.actor.ActorSystem;
+import akka.pattern.Patterns;
+import akka.util.Timeout;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
@@ -8,6 +12,10 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.client.RestTemplate;
+import scala.concurrent.duration.Duration;
+
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.shelajev.concurrencydemo.Misc.stall;
 
@@ -30,50 +38,22 @@ public class Controller {
 
   private Problem getSolution() {
     return urls -> {
+        AtomicReference<byte[]> result = new AtomicReference<>();
+        ActorSystem system = ActorSystem.create("Search");
 
-      byte[][] result = new byte[1][];
-      PetersonLock lock = new PetersonLock();
-      String url0 = urls[0];
-      String url1 = urls[1];
+        for(int i = 0; i < urls.length; i++) {
+          String url = urls[i];
+          char c = (char) ('a' + i);
+          final ActorRef q = system.actorOf(
+            Actors.UrlFetcher.props(restTemplate, result), "loading_"+ c);
 
-      Thread t1 = new Thread(()-> {
-        lock.flag0 = true;
-        lock.turn = 1;
-
-        while(lock.flag1 && lock.turn == 1) {
-          //busy wait
+          Patterns.ask(q, new Actors.Url2Fetch(url), new Timeout(Duration.create(5, TimeUnit.SECONDS)));
         }
-        //critical section
-        byte[] bytes = getBytes(url0);
-        if(result[0] == null) {
-          result[0] = bytes;
+        while(result.get() == null) {
+          Misc.sleep(200);
         }
-
-        lock.flag0 = false;
-      });
-
-      Thread t2 = new Thread(()-> {
-        lock.flag1 = true;
-        lock.turn = 0;
-
-        while(lock.flag0 && lock.turn == 0) {
-          //busy wait
-        }
-        //critical section
-        byte[] bytes = getBytes(url1);
-        if(result[0] == null) {
-          result[0] = bytes;
-        }
-
-        lock.flag1 = false;
-      });
-
-      t1.start(); t2.start();
-      while(result[0] == null) {
-        Misc.sleep(200);
-      }
-      return result[0];
-    };
+        return result.get();
+      };
   }
 
   private byte[] getBytes(String url) {

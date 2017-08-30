@@ -9,9 +9,7 @@ import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.client.RestTemplate;
 
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorCompletionService;
-import java.util.concurrent.Executors;
+import java.util.Arrays;
 
 import static org.shelajev.concurrencydemo.Misc.stall;
 
@@ -33,25 +31,11 @@ public class Controller {
   }
 
   private Problem getSolution() {
-    return (Problem) urls -> {
-      ExecutorCompletionService<byte[]> service = new ExecutorCompletionService<byte[]>(Executors.newFixedThreadPool(4));
+    return urls -> Arrays.asList(urls).stream().parallel().map(this::getBytes).findAny().get();
+  }
 
-      for (String url : urls) {
-        log.info("Fetching {}", url);
-        service.submit(() ->
-        {
-          stall();
-          return restTemplate.getForObject(url, byte[].class);
-        });
-      }
-
-      try {
-        return service.take().get();
-      }
-      catch (ExecutionException | InterruptedException e) {
-        Misc.rethrow(e);
-      }
-      return null;
-    };
+  private byte[] getBytes(String url) {
+    stall();
+    return restTemplate.getForObject(url, byte[].class);
   }
 }
